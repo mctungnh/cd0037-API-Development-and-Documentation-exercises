@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy  # , or_
 from flask_cors import CORS
 import random
 
-from models import setup_db, Book
+from models import setup_db, Book, db
 
 BOOKS_PER_SHELF = 8
 
@@ -18,6 +18,7 @@ BOOKS_PER_SHELF = 8
 def create_app(test_config=None):
     # create and configure the app
     app = Flask(__name__)
+    app.app_context().push()
     setup_db(app)
     CORS(app)
 
@@ -28,32 +29,106 @@ def create_app(test_config=None):
             "Access-Control-Allow-Headers", "Content-Type,Authorization,true"
         )
         response.headers.add(
-            "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
+            "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS,PATCH"
         )
         return response
 
-    # @TODO: Write a route that retrivies all books, paginated.
-    #         You can use the constant above to paginate by eight books.
-    #         If you decide to change the number of books per page,
-    #         update the frontend to handle additional books in the styling and pagination
-    #         Response body keys: 'success', 'books' and 'total_books'
-    # TEST: When completed, the webpage will display books including title, author, and rating shown as stars
+    @app.route('/')
+    def home():
+        return "hello"
 
-    # @TODO: Write a route that will update a single book's rating.
-    #         It should only be able to update the rating, not the entire representation
-    #         and should follow API design principles regarding method and route.
-    #         Response body keys: 'success'
-    # TEST: When completed, you will be able to click on stars to update a book's rating and it will persist after refresh
+    @app.route('/books')
+    def get_books():
+        booksPerPage = 8
+        page = request.args.get("page", 1, type=int)
+        start = (page - 1) * booksPerPage
+        end = start + booksPerPage
+        
+        books = Book.query.order_by(Book.id).all()
+        formatted_books = [book.format() for book in books]
+        return jsonify({
+            "books": formatted_books,
+            "success": True,
+            "total_books": len(books),
+        })
 
-    # @TODO: Write a route that will delete a single book.
-    #        Response body keys: 'success', 'deleted'(id of deleted book), 'books' and 'total_books'
-    #        Response body keys: 'success', 'books' and 'total_books'
+    @app.route("/books/<int:id>", methods=["GET", "PATCH"])
+    def update_rating(id):
+        book = Book.query.filter(Book.id == id).one_or_none()
+        if book is None:
+            abort(400)
 
-    # TEST: When completed, you will be able to delete a single book by clicking on the trashcan.
+        if request.method == "GET":
+            return jsonify({"success": True, "book": book.format()})
+        else:
+            failed = False
+            rating = request.args.get("rating", 0, type=int)
+            try :
+                book.rating = rating
+                book.update()
+            except:
+                db.session.rollback()
+                failed = True
+            finally:
+                db.session.close()
 
-    # @TODO: Write a route that create a new book.
-    #        Response body keys: 'success', 'created'(id of created book), 'books' and 'total_books'
-    # TEST: When completed, you will be able to a new book using the form. Try doing so from the last page of books.
-    #       Your new book should show up immediately after you submit it at the end of the page.
+            if failed:
+                abort(503)
+
+            return jsonify(
+                {
+                    "success": True,
+                    # "book": book.format()
+                }
+            )
+        
+
+    @app.route("/books/<int:book_id>", methods=["DELETE"])
+    def delete_book(book_id):
+        book = Book.query.filter(Book.id == book_id).one_or_none()
+        if book is None:
+            abort(400)
+        
+        try:
+            book.delete()
+        except:
+            return(503)
+        finally:
+            db.session.close()
+            
+        books = Book.query.order_by(Book.id).all()
+        formatted_books = [book.format() for book in books]
+        
+        return jsonify({
+            "success": True,
+            "deleted": book_id,
+            "books": formatted_books,
+            "total_books": len(formatted_books)
+        })
+        
+    
+    @app.route("/books", methods=["POST"])
+    def create_book():
+        book = Book(
+            title=request.args.get("title", "untitled", type=str),
+            author=request.args.get("author", "untitled", type=str),
+            rating=request.args.get("rating", 0, type=int),
+        )
+        try:
+            book.insert()
+        except:
+            return(503)
+        finally:
+            db.session.close()
+            
+        books = Book.query.order_by(Book.id).all()
+        formatted_books = [book.format() for book in books]
+        
+        return jsonify({
+            "success": True,
+            # "created": book.id,
+            "books": formatted_books,
+            "total_books": len(formatted_books)
+        })
 
     return app
