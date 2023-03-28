@@ -23,6 +23,7 @@ def paginate_books(request, selection):
 def create_app(test_config=None):
     # create and configure the app
     app = Flask(__name__)
+    app.app_context().push()
     setup_db(app)
     CORS(app)
 
